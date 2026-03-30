@@ -54,6 +54,10 @@ async def create_lead(
     user: User = Depends(get_current_user)
 ):
     form_data = await request.form()
+    try:
+        rating = int(form_data.get("rating") or 0)
+    except (ValueError, TypeError):
+        rating = 0
     lead_in = LeadCreate(
         salutation=form_data.get("salutation"),
         first_name=form_data.get("first_name"),
@@ -63,11 +67,28 @@ async def create_lead(
         company=form_data.get("company"),
         title=form_data.get("title"),
         source=form_data.get("source"),
-        rating=int(form_data.get("rating") or 0),
+        rating=rating,
         status=form_data.get("status", "New"),
         owner_id=user.id
     )
-    lead_service.create_lead(db, lead_in)
+    try:
+        lead_service.create_lead(db, lead_in)
+    except ValueError as e:
+        leads = lead_service.get_leads(db)
+        return templates.TemplateResponse(
+            "leads.html",
+            {
+                "request": request,
+                "error": str(e),
+                "form_data": lead_in,
+                "leads": leads,
+                "user": user,
+                "title": "Leads",
+                "lead_sources": LEAD_SOURCES,
+                "filters": {},
+            },
+            status_code=422,
+        )
     return RedirectResponse(url="/leads", status_code=303)
 
 @router.post("/leads/import")
@@ -80,7 +101,10 @@ async def import_leads(
         raise HTTPException(status_code=400, detail="Invalid file format. Please upload a CSV.")
     
     content = await file.read()
-    decoded = content.decode('utf-8')
+    try:
+        decoded = content.decode('utf-8')
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid file encoding. Please upload a UTF-8 CSV file.")
     reader = csv.DictReader(io.StringIO(decoded))
     
     for row in reader:

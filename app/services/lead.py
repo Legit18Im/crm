@@ -1,6 +1,7 @@
 from typing import List, Optional
 from datetime import timedelta
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from app.models.lead import Lead
 from app.models.lead_history import LeadHistory
 from app.schemas.lead import LeadCreate
@@ -37,9 +38,21 @@ def get_lead(db: Session, lead_id: int):
     return db.query(Lead).filter(Lead.id == lead_id).first()
 
 def create_lead(db: Session, lead: LeadCreate):
+    if lead.phone:
+        existing = db.query(Lead).filter(Lead.phone == lead.phone).first()
+        if existing:
+            raise ValueError("A lead with this phone number already exists")
+    if lead.email:
+        existing = db.query(Lead).filter(Lead.email == lead.email).first()
+        if existing:
+            raise ValueError("A lead with this email already exists")
     db_lead = Lead(**lead.dict())
     db.add(db_lead)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise ValueError("A lead with this phone or email already exists")
     db.refresh(db_lead)
     # Auto-activity: record that a new lead was created
     from app.services.activity import log_activity
